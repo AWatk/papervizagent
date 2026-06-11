@@ -49,27 +49,32 @@ def get_config_val(section, key, env_var, default=""):
         val = model_config[section].get(key)
     return val or default
 
-# Initialize clients lazily or with robust defaults
-try:
-    import google.auth
-    creds, _ = google.auth.default()
-    if not hasattr(creds, "service_account_email"):
-        print(f"DEBUG: Running with credentials: {type(creds)}")
-    project_id = get_config_val("google_cloud", "project_id", "GOOGLE_CLOUD_PROJECT", "")
-    location = get_config_val("google_cloud", "location", "GOOGLE_CLOUD_LOCATION", "global")
-    print(f"DEBUG: Initialized Gemini Client with Project: {project_id}, Location: {location}")
-    
-    # Try Vertex AI first (preferred for Cloud Run)
-    gemini_client = genai.Client(vertexai=True, project=project_id, location=location)
-except ValueError:
-    # Fallback to API Key if Vertex fails (e.g. local dev without ADC)
+project_id = get_config_val("google_cloud", "project_id", "GOOGLE_CLOUD_PROJECT", "")
+location = get_config_val("google_cloud", "location", "GOOGLE_CLOUD_LOCATION", "global")
+
+def create_gemini_client():
+    """Create a Gemini client using API key first, then Vertex AI as fallback."""
     api_key = get_config_val("api_keys", "google_api_key", "GOOGLE_API_KEY", "")
     if api_key:
-        gemini_client = genai.Client(api_key=api_key)
-        print("Initialized Gemini Client with API Key")
-    else:
-        print("Warning: Could not initialize Gemini Client. Missing credentials.")
-        gemini_client = None
+        print("DEBUG: Initializing Gemini Client with API Key")
+        return genai.Client(api_key=api_key)
+
+    try:
+        import google.auth
+        creds, _ = google.auth.default()
+        if not hasattr(creds, "service_account_email"):
+            print(f"DEBUG: Running with credentials: {type(creds)}")
+        print(f"DEBUG: Initialized Gemini Client with Project: {project_id}, Location: {location}")
+        return genai.Client(vertexai=True, project=project_id, location=location)
+    except Exception as e:
+        print(
+            "Warning: Could not initialize Gemini Client. "
+            "Set GOOGLE_API_KEY or configure Application Default Credentials "
+            f"for Vertex AI. Details: {e}"
+        )
+        return None
+
+gemini_client = create_gemini_client()
 
 anthropic_project_id = get_config_val("anthropic", "project_id", "ANTHROPIC_PROJECT_ID", project_id)
 anthropic_region = get_config_val("anthropic", "region", "ANTHROPIC_REGION", "us-central1")
